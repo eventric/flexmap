@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+					   xmlns:s="library://ns.adobe.com/flex/spark"
+					   xmlns:mx="library://ns.adobe.com/flex/mx"
+					   xmlns:JSAIR="*"
+					   width="100%"
+					   height="100%"
+					   creationComplete="onCreationComplete()">
+	<fx:Script>
+		<![CDATA[
+			import com.eventric.maps.LatLng;
+			import com.eventric.maps.LatLngBounds;
+			import com.eventric.maps.MapMouseEvent;
+			import com.eventric.maps.overlays.Marker;
+			import com.eventric.maps.overlays.MarkerOptions;
+			import com.eventric.maps.overlays.Polyline;
+			import com.eventric.maps.styles.FillStyle;
+
+			// enter this to skip the first screen:
+			[Bindable] private var mapAPIKey:String = "";
+
+			/**
+			 * Handles showing the API Key entry area or just head to the map if it has one already
+			 */
+			public function onCreationComplete():void
+			{
+				mapAPIKey != "" ? stack.selectedIndex = 1 : stack.selectedIndex = 0;
+			}
+
+			/**
+			 * Handler for after the map initialization is complete
+			 */
+			public function onMapReady():void
+			{
+				runExample1();
+			}
+
+
+			/**
+			 * Example 1: Adding a basic marker.
+			 */
+			public function runExample1():void
+			{
+				var latLong:LatLng = new LatLng(41.883573,-87.621764);
+				var markerOptions:MarkerOptions = new MarkerOptions({
+					clickable: true,
+					fillStyle: new FillStyle({
+						color: "#00FF00",
+						alpha: 0.8
+					})
+				});
+
+				markerOptions.customContent = '<div id="content" style="background-color:#ffffff; height:40px; width:100%; color:#222222; line-height:0px; font-size:8pt;">' +
+					'<p style="font-weight:bold; line-height: 2px;">Pritzger Pavilion</p><p style="line-height: 2px;">201 E Randolph</p>' +
+					'<p style="line-height: 2px;">Chicago, IL 60601</p></div>';
+
+				var exampleMarker1:Marker = new Marker(latLong,markerOptions);
+				exampleMarker1.clickHandler = onMarkerClick;
+
+				map.addOverlay(exampleMarker1);
+				map.setCenter(latLong,10);
+			}
+
+
+			/**
+			 * Example 2: add 2 markers, far away from each other, add a connecting line, then set the center
+			 * between the 2
+			 */
+			public function runExample2():void
+			{
+				var latLong:LatLng = new LatLng(41.883573,-87.621764);
+				var markerOptions:MarkerOptions = new MarkerOptions({
+					clickable: true,
+					fillStyle: new FillStyle({
+						color: "#0000FF",
+						alpha: 0.8
+					})
+				});
+
+				markerOptions.customContent = '<div id="content" style="background-color:#ffffff; height:40px; width:100%; color:#222222; line-height:0px; font-size:8pt;">' +
+					'<p style="font-weight:bold; line-height: 2px;">Pritzger Pavilion</p><p style="line-height: 2px;">201 E Randolph</p>' +
+					'<p style="line-height: 2px;">Chicago, IL 60601</p></div>';
+
+				var exampleMarker1:Marker = new Marker(latLong,markerOptions);
+				exampleMarker1.clickHandler = onMarkerClick;
+
+				map.addOverlay(exampleMarker1);
+
+				var latLong2:LatLng = new LatLng(39.666202,-105.205428);
+				var markerOptions2:MarkerOptions = new MarkerOptions({
+					clickable: true,
+					fillStyle: new FillStyle({
+						color: "#FF0000",
+						alpha: 0.8
+					})
+				});
+
+				markerOptions2.customContent = '<div id="content" style="background-color:#ffffff; height:40px; width:100%; color:#222222; line-height:0px; font-size:8pt;">' +
+					'<p style="font-weight:bold; line-height: 2px;">Red Rock Amphitheatre</p><p style="line-height: 2px;">18300 W Alameda Pkway</p>' +
+					'<p style="line-height: 2px;">Golden, CO 80401</p></div>';
+
+				var exampleMarker2:Marker = new Marker(latLong2,markerOptions2);
+				exampleMarker2.clickHandler = onMarkerClick;
+
+				map.addOverlay(exampleMarker2);
+
+				var examplePolyline:Polyline = new Polyline([
+					exampleMarker1.getPosition(),
+					exampleMarker2.getPosition()
+				]);
+				var bounds:LatLngBounds = examplePolyline.getLatLngBounds();
+
+				map.addOverlay( examplePolyline );
+				map.setZoom( map.getBoundsZoomLevel( bounds ) );
+				map.setCenter( bounds.getCenter() );
+			}
+
+			/**
+			 * Drop-in point for any marker clicks (called between the click and opening the google map infowindow)
+			 * @param MapMouseEvent The event called by clicking on a map marker
+			 */
+			private function onMarkerClick(event:MapMouseEvent):void
+			{
+				// do something with the click information
+			}
+
+			private function clearMapMarkers():void
+			{
+				map.clearOverlays();
+			}
+		]]>
+	</fx:Script>
+
+	<mx:ViewStack id="stack" width="100%" height="100%">
+		<mx:VBox horizontalAlign="center" paddingTop="50">
+			<s:Label text="Google Maps v3 Javascript API Key (enter as map variable to skip this):"/>
+			<s:TextInput id="apiKey" width="300" change="{mapAPIKey = apiKey.text}"/>
+			<s:Button label="Run Map!" click="stack.selectedIndex = 1;" enabled="{apiKey.text != ''}"/>
+		</mx:VBox>
+		<mx:Canvas width="100%" height="100%">
+			<JSAIR:JSAIRMap
+				id="map"
+				width="100%"
+				height="320"
+				apikey="{mapAPIKey}"
+				sensor="false"
+				mapevent_mapready="{onMapReady}"
+				markerIcon="{JSAIRMap.BACKWARD_CLOSED_ARROW}"
+				/>
+
+			<s:Button label="Run Ex 1" click="clearMapMarkers(); runExample1();" left="5" bottom="5"/>
+			<s:Button label="Run Ex 2" click="clearMapMarkers(); runExample2();" left="95" bottom="5"/>
+			<s:Button label="Clear Overlays" click="clearMapMarkers();" left="185" bottom="5"/>
+		</mx:Canvas>
+	</mx:ViewStack>
+
+</s:WindowedApplication>

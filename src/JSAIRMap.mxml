@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+////////////////////////////////////////////////////////////////////////////////
+//
+//  AIR-based google map component using the v3 Javascript API
+//
+//  @author     Christian Dawson
+//  @copyright  2012-2013 Eventric LLC
+//  @license    http://www.gnu.org/licenses/lgpl.html  LGPL
+//  @version    1.0
+//
+////////////////////////////////////////////////////////////////////////////////
+-->
+<mx:HTML xmlns:fx="http://ns.adobe.com/mxml/2009"
+		 xmlns:s="library://ns.adobe.com/flex/spark"
+		 xmlns:mx="library://ns.adobe.com/flex/mx"
+		 width="100%"
+		 height="100%"
+		 preinitialize="onPreinitialize()"
+		 initialize="loadAPIScript()">
+
+	<fx:Script>
+		<![CDATA[
+			import com.eventric.maps.InfoWindowOptions;
+			import com.eventric.maps.LatLng;
+			import com.eventric.maps.LatLngBounds;
+			import com.eventric.maps.MapMouseEvent;
+			import com.eventric.maps.overlays.Marker;
+			import com.eventric.maps.overlays.Polyline;
+
+			import iotashan.utils.URLEncoding;
+			import mx.events.FlexEvent;
+
+			/****************************  Public Variables  ****************************/
+
+			// This event is fired when map initialization is complete and isLoaded() would return true. This means position, zoom and map type are all
+			// initialized, but tile images may still be loading.
+			[Bindable] public var mapevent_mapready:Function;
+
+			// This event is fired immediately before the map is initialized. This event indicates the correct time to call setInitOptions(...) on the map,
+			// passing an instance of MapOptions that contains options that the map should have when first displayed.
+			[Bindable] public var mapevent_mappreinitialize:Function;
+
+			// Error handler to bubble up any issues
+			[Bindable] public var errorHandler:Function;
+
+			// The user's google maps api v3 key:
+			[Bindable] public var apikey:String = null;
+
+			// The desired map country code. If set this provides the country code used by default for geocoding and directions queries. In both instances,
+			// however, the default code may be overridden on an individual query basis.
+			public var countryCode:String = null;
+
+			// The desired map language. Note that we'd generally recommend that you not set this. If left null then the map will pick up its
+			// language from the user's browser settings. Before setting this you might first try changing your browser's preferred language
+			// setting to see how your map will appear to a user in a different country. Set this explicitly only if you are certain of the language
+			// in which all users will interact with your map. This will override the language used for button labels, geocoding and directions queries.
+			public var language:String = null;
+
+			// (AIR only) Sets the user's preferred languages.
+			public var languages:String = null;
+
+			// Set to true to enable raising of overlays upon mouse-over. If enabled then a mouse-over event over an overlay that supports it
+			// (only markers do at present) will bring that overlay to the top. By default overlay raising is enabled.
+			public var overlayRaising:Boolean = true;
+
+			// The map sensor property, may be "false" or "true". Use of the Google Maps API now requires that you indicate whether your application
+			// is using a sensor (such as a GPS locator) to determine the user's location.
+			public var sensor:String = "false";
+
+			// The desired map library version.
+			public var version:String = null;
+
+			// Instance of the cross-domain wrapper for this object.
+			public var wrapper:Object;
+
+			public static const CIRCLE:int = 0;
+			public static const BACKWARD_CLOSED_ARROW:int = 3;
+			public static const FORWARD_CLOSED_ARROW:int = 1;
+			public static const BACKWARD_OPEN_ARROW:int = 4;
+			public static const FORWARD_OPEN_ARROW:int = 2;
+
+			public var markerIcon:Object = JSAIRMap.CIRCLE;
+			public var markerFillOpacity:Number = 0.8;
+			public var markerScale:Object = 5;
+			public var markerStrokeWeight:Object = 2;
+			public var polylineStrokeColor:String = "#8584FC";
+			public var polylineStrokeOpacity:Number = 1.0;
+			public var polylineStrokeWeight:Number = 2;
+
+			public var customIconHeight:Number = 10;
+			public var customIconWidth:Number = 10;
+
+			// To Be Implemented:
+			// public var channel:String = null;
+			// public var client:String = null;
+			// public var focusable:Boolean = true;
+
+			/****************************************************************************/
+
+			[Bindable] protected var map:Object = new Object();
+			[Bindable] protected var googleMapObject:Object = new Object();
+
+			[Bindable] private var localMarkersArray:Array = new Array();
+			[Bindable] private var remoteMarkersArray:Array = new Array();
+			[Bindable] private var travelPath:Object = null;
+
+			private var keyCheckLoopAmount:int = 0;
+
+
+			/**
+			 * Handles any pre-initialization functions needed
+			 */
+			private function onPreinitialize():void
+			{
+				//this.addEventListener(FlexEvent.PREINITIALIZE, this.mapevent_mappreinitialize);
+			}
+
+			/**
+			 * Sets up a call to the google map API with the user's key
+			 */
+			private function loadAPIScript():void
+			{
+				// add a listener for when the html is rendered, and we'll have our google api handle
+				this.addEventListener(Event.HTML_RENDER, onRender);
+
+				// this will cause an infinite loop
+				if (!this.apikey)
+				{
+					keyCheckLoopAmount++;
+
+					if (keyCheckLoopAmount == 10)
+						throw new Error("No API key has been provided to the map.");
+					else
+						this.callLater(loadAPIScript);
+
+					return;
+				}
+
+				var scriptData:String = "<script type=\"text/javascript\" src=\"https://maps.googleapis.com/maps/api/js?key=" + this.apikey + "&sensor=" + this.sensor + "\"></script><div id=\"map_canvas\" style=\"width:100%;height:100%;\"></div><script type=\"text/javascript\">var mapPointer = document.getElementById(\"map_canvas\");</script>";
+				this.htmlLoader.window.document.write(scriptData);
+			}
+
+			/**
+			 * Handles the dom rendering the api's return handler
+			 * @param	Event	Event.HTML_RENDER
+			 */
+			private function onRender(event:Event=null):void
+			{
+				if (this.htmlLoader.window.hasOwnProperty("google"))
+				{
+					// make sure the following code only fires once:
+					this.removeEventListener(Event.HTML_RENDER,onRender);
+
+					// attach our handler
+					googleMapObject = this.htmlLoader.window.google.maps;
+
+					// check that the map has had sufficient time to load:
+					try {
+						var tempLatLng = new googleMapObject.LatLng(0,0);
+					}
+					catch(error:Error) {
+						this.callLater(onRender);
+						return;
+					}
+
+					this.callLater(initMap);
+
+					// @TODO: how to call this
+					this.callLater(this.mapevent_mapready);
+				}
+			}
+
+			/**
+			 * 	Initializes the Map
+			 */
+			private function initMap():void
+			{
+				var mapOptions:Object = {
+					center: new googleMapObject.LatLng(0,0),
+						zoom: 10,
+						mapTypeId: googleMapObject.MapTypeId.ROADMAP
+				};
+
+				// here we have access to the dom object pointer set up in the declarations above
+				map = new googleMapObject.Map(this.htmlLoader.window.mapPointer, mapOptions);
+			}
+
+			/**
+			 *	Adds array of latlngs to the map.
+			 * 	@param	Array	Array of Markers
+			 */
+			public function addOverlay( overlay:Object ):void
+			{
+				if (overlay is Marker)
+				{
+					var latLng:LatLng = overlay.getPosition();
+					var marker:Marker = new Marker(latLng);
+
+					if (overlay.clickHandler) marker.clickHandler = overlay.clickHandler;
+					if (overlay.doubleClickHandler) marker.doubleClickHandler = overlay.doubleClickHandler;
+					if (overlay.mouseDownHandler) marker.mouseDownHandler = overlay.mouseDownHandler;
+					if (overlay.mouseOutHandler) marker.mouseOutHandler = overlay.mouseOutHandler;
+					if (overlay.mouseOverHandler) marker.mouseOverHandler = overlay.mouseOverHandler;
+					if (overlay.mouseUpHandler) marker.mouseUpHandler = overlay.mouseUpHandler;
+
+					marker.data = overlay.data;
+					marker.title = overlay.getOptions().tooltip;
+					marker.setOptions(overlay.getOptions());
+					marker.iconUrl = overlay.iconUrl != "" ? overlay.iconUrl : null;
+
+					localMarkersArray.push(marker);
+
+					onMarkerDataProviderUpdate();
+				}
+				else if (overlay is Polyline)
+				{
+					onPolylineDataProviderUpdate(overlay);
+				}
+				else
+				{
+					throw new Error("Adding an overlay that isn't a Marker or Polyline isn't supported currently.");
+					return;
+				}
+			}
+
+			/**
+			 * 	Clears the markers array
+			 */
+			public function clearOverlays():void
+			{
+				// first, clear out the markers:
+				if (travelPath) travelPath.setMap(null);
+				for each (var marker:Object in remoteMarkersArray)
+					marker.setMap(null);
+
+				remoteMarkersArray = new Array();
+				localMarkersArray = new Array();
+			}
+
+			/**
+			 * 	Sets the center of the map
+			 */
+			public function setCenter(latLong:LatLng, zoomLevel:int=10):void
+			{
+				// this is the case if we're passing in latlngbounds (which we can't compute the center locally):
+				if (!latLong)
+				{
+					var tmpCoordsArray:Array = new Array();
+
+					for each (var localMarker:Marker in localMarkersArray)
+					tmpCoordsArray.push(localMarker.getPosition());
+
+					var bounds:LatLngBounds = new LatLngBounds(tmpCoordsArray);
+					this.setZoom(this.getBoundsZoomLevel(bounds));
+				}
+				else
+				{
+					var remoteLatLng:Object = new googleMapObject.LatLng(latLong.latitude,latLong.longitude);
+					map.setCenter(remoteLatLng);
+					map.setZoom(zoomLevel);
+				}
+			}
+
+			/**
+			 * 	Sets the zoom level of the map
+			 */
+			public function setZoom(zoomLevel:int):void
+			{
+				map.setZoom(zoomLevel);
+			}
+
+			/**
+			 * 	Sets the zoom level of the map
+			 */
+			public function getBoundsZoomLevel(bounds:LatLngBounds):int
+			{
+				var remoteBounds:Object = new googleMapObject.LatLngBounds();
+
+				for each (var latLng:LatLng in bounds.coordinates)
+					remoteBounds.extend(latLng);
+
+				map.fitBounds(remoteBounds);
+
+				return map.getZoom();
+			}
+
+			/**
+			 * 	@TODO
+			 */
+			public function clearControls():void
+			{
+
+			}
+
+			/**
+			 * 	@TODO
+			 */
+			public function addControl(mapControl:Object):void
+			{
+
+			}
+
+			/**
+			 * 	@TODO
+			 */
+			public function enableContinuousZoom():void
+			{
+
+			}
+
+			/**
+			 * 	@TODO
+			 */
+			public function enableScrollWheelZoom():void
+			{
+
+			}
+
+			private function attachInfoWindowToMarker( infoWindow:Object, localMarker:Marker, remoteMarker:Object ):void
+			{
+				// attach click handlers:
+				googleMapObject.event.addListener(remoteMarker, MapMouseEvent.CLICK, function():void
+				{
+					localMarker.interceptClick(localMarker);
+
+					infoWindow.setContent(localMarker.infoWindow.customContent);
+					infoWindow.setOptions(localMarker.infoWindow);
+					infoWindow.open(map,remoteMarker);
+				});
+			}
+
+			/**
+			 *	Handles updating the map's markers
+			 */
+			private function onMarkerDataProviderUpdate():void
+			{
+				// first, clear out the remote markers, as this function is called everytime a marker is added/removed:
+				for each (var marker:Object in remoteMarkersArray)
+					marker.setMap(null);
+
+				var infoWindow:Object = new googleMapObject.InfoWindow();
+
+				for each (var localMarker:Marker in localMarkersArray)
+				{
+					var remoteMarker:Object = new googleMapObject.Marker();
+					var remoteLatLng:Object = new googleMapObject.LatLng(localMarker.getPosition().latitude,localMarker.getPosition().longitude);
+
+					var pin:Object = {
+						path: markerIcon,
+						fillColor: (localMarker.getOptions().fillStyle && localMarker.getOptions().fillStyle.hasOwnProperty("color") ? localMarker.getOptions().fillStyle.color : "green"),
+						fillOpacity: markerFillOpacity,
+						scale: markerScale,
+						strokeWeight: markerStrokeWeight
+					};
+
+					remoteMarker.setPosition(remoteLatLng);
+					remoteMarker.setMap(map);
+					remoteMarker.setTitle(URLEncoding.urlEncode(localMarker.title));
+
+					if (!localMarker.iconUrl)
+						remoteMarker.setIcon(pin);
+					else
+						remoteMarker.setIcon(new googleMapObject.MarkerImage(localMarker.iconUrl),new googleMapObject.Size(this.customIconHeight, this.customIconWidth),new googleMapObject.Point(0,0),new googleMapObject.Point(0, 32));
+
+					attachInfoWindowToMarker(infoWindow,localMarker,remoteMarker);
+
+					remoteMarkersArray.push(remoteMarker);
+				}
+			}
+
+			/**
+			 *	Handles updating the map's markers
+			 */
+			private function onPolylineDataProviderUpdate( overlay:Object ):void
+			{
+				if (travelPath)
+					travelPath.setMap(null);
+
+				var remoteLatLngArray:Array = new Array();
+
+				for each (var latLng:LatLng in overlay.data)
+				{
+					var remoteLatLng:Object = new googleMapObject.LatLng(latLng.latitude,latLng.longitude);
+					remoteLatLngArray.push(remoteLatLng);
+				}
+
+				travelPath = new googleMapObject.Polyline({
+					path: remoteLatLngArray,
+					strokeColor: polylineStrokeColor,
+					strokeOpacity: polylineStrokeOpacity,
+					strokeWeight: polylineStrokeWeight
+				});
+
+				travelPath.setMap(map);
+			}
+		]]>
+	</fx:Script>
+
+</mx:HTML>
